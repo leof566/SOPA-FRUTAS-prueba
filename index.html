@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#4f46e5">
+<title>Sopa de Letras - Frutas (PWA FIX)</title>
+<style>
+  :root{
+    --bg1:#4f46e5; --bg2:#06b6d4; --accent:#22c55e; --ink:#0b1021; --card:#ffffff;
+    --muted:#6b7280; --found:#fde68a; --select:#93c5fd;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+    color:var(--ink);
+    background: radial-gradient(1200px 800px at 20% -10%, var(--bg2), transparent),
+                radial-gradient(1200px 800px at 120% 10%, var(--bg1), transparent),
+                linear-gradient(120deg, #0ea5e9 0%, #22c55e 100%);
+    background-attachment: fixed;
+  }
+  .wrap{ max-width:1100px; margin:32px auto; padding:16px; }
+  .game{ display:grid; gap:16px; grid-template-columns: 1.2fr 1fr; }
+  .card{
+    background:var(--card); border-radius:20px; padding:20px;
+    box-shadow: 0 10px 30px rgba(22,28,45,.15), inset 0 1px 0 rgba(255,255,255,.6);
+  }
+  h1{
+    margin:0 0 12px 0; font-weight:800; letter-spacing:.3px;
+    background: linear-gradient(90deg,#111827,#4f46e5 60%,#06b6d4);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    font-size: clamp(22px, 4vw, 34px);
+  }
+  .meta{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+  .pill{ display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:999px; background:#f3f4f6; font-weight:700; }
+  .pill .dot{width:10px; height:10px; border-radius:50%}
+  .pill.time .dot{background:var(--bg1)}
+  .pill.score .dot{background:var(--accent)}
+  .pill.state .dot{background:#f59e0b}
+  .btn{ cursor:pointer; background:linear-gradient(90deg,#4f46e5,#06b6d4); color:white; border:0; padding:10px 16px; border-radius:12px; font-weight:800; box-shadow:0 8px 20px rgba(79,70,229,.4); }
+  .grid{ display:grid; gap:6px; user-select:none; touch-action:none; }
+  .cell{
+    width:36px; height:36px; display:grid; place-items:center;
+    background:#eef2ff; border-radius:10px; font-weight:800; font-size:18px;
+    box-shadow: inset 0 -2px 0 rgba(0,0,0,.05);
+  }
+  .cell.selected{ background: var(--select); }
+  .cell.found{ background: var(--found); animation: pop .25s ease }
+  @keyframes pop{ from{ transform:scale(.92) } to{ transform:scale(1)} }
+  .words{ display:flex; flex-direction:column; gap:10px; }
+  .list{ display:flex; flex-wrap:wrap; gap:8px }
+  .tag{ padding:8px 12px; border-radius:999px; background:#f1f5f9; font-weight:700; border:2px dashed transparent; }
+  .tag.found{ background:#dcfce7; border-color:#22c55e }
+  .footer{ display:flex; align-items:center; justify-content:space-between; margin-top:12px; }
+  .note{ color:var(--muted); font-size:14px }
+  .end-screen{ display:none; position:fixed; inset:0; background:rgba(12, 13, 27, .72); backdrop-filter: blur(6px); place-items:center; z-index:10; }
+  .end-card{ background:white; padding:24px; border-radius:18px; max-width:520px; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,.25); }
+  @media (max-width: 900px){
+    .game{ grid-template-columns:1fr; }
+    .grid .cell{ width:34px; height:34px; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Busca las Frutas 🍓🥝 — <span style="font-weight:600">Sopa de Letras</span></h1>
+      <div class="meta">
+        <div class="pill time"><span class="dot"></span><span id="time">50</span> s</div>
+        <div class="pill score"><span class="dot"></span><span id="score">0</span>/5 encontradas</div>
+        <div class="pill state"><span class="dot"></span><span id="state">Jugando...</span></div>
+        <button class="btn" id="restart">Reiniciar</button>
+      </div>
+    </div>
+
+    <div class="game">
+      <div class="card">
+        <div id="grid" class="grid"></div>
+        <div class="footer">
+          <span class="note">Arrastrá para seleccionar en línea recta (↔ ↕ ↗ ↘). También cuenta al revés.</span>
+        </div>
+      </div>
+
+      <div class="card words">
+        <h3>Palabras a encontrar</h3>
+        <div class="list" id="wordList"></div>
+        <div class="note">Frutas incluidas: <strong>MANZANA, PERA, KIWI, BANANA, MANGO</strong></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="end-screen" id="end">
+    <div class="end-card">
+      <h2 id="endTitle">¡Tiempo!</h2>
+      <p id="endMsg">Se acabaron los 50 segundos. ¿Otra ronda?</p>
+      <button class="btn again" id="playAgain">Jugar de nuevo</button>
+    </div>
+  </div>
+
+<script>
+// --- PWA registration ---
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
+}
+</script>
+
+<script>
+// --- GAME LOGIC (clean) ---
+(function(){
+  const WORDS = ["MANZANA","PERA","KIWI","BANANA","MANGO"];
+  const SIZE = 10;
+  const TIME_LIMIT = 50;
+
+  const gridEl = document.getElementById("grid");
+  const timeEl = document.getElementById("time");
+  const scoreEl = document.getElementById("score");
+  const stateEl = document.getElementById("state");
+  const wordListEl = document.getElementById("wordList");
+  const endScreen = document.getElementById("end");
+  const endTitle = document.getElementById("endTitle");
+  const endMsg = document.getElementById("endMsg");
+  const restartBtn = document.getElementById("restart");
+  const playAgainBtn = document.getElementById("playAgain");
+
+  let grid = Array.from({length:SIZE}, _=> Array(SIZE).fill(""));
+  let cells = [];
+  let placedWords = {};
+  let found = new Set();
+  let selecting = false;
+  let startIndex = null;
+  let direction = null;
+  let selection = [];
+  let timer = null;
+  let timeLeft = TIME_LIMIT;
+  let playing = true;
+
+  const DIRS = [
+    {r:0,c:1},{r:0,c:-1},{r:1,c:0},{r:-1,c:0},
+    {r:1,c:1},{r:1,c:-1},{r:-1,c:1},{r:-1,c:-1}
+  ];
+  const letters = "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ";
+
+  function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a }
+  function randChoice(arr){ return arr[Math.floor(Math.random()*arr.length)] }
+  function inBounds(r,c){ return r>=0 && r<SIZE && c>=0 && c<SIZE }
+  function idx(r,c){ return r*SIZE + c }
+  function rc(i){ return [Math.floor(i/SIZE), i%SIZE] }
+
+  function startTimer(){
+    clearInterval(timer);
+    timeLeft = TIME_LIMIT; timeEl.textContent = timeLeft;
+    timer = setInterval(()=>{
+      timeLeft--; timeEl.textContent = timeLeft;
+      if(timeLeft<=0){ finish(false); }
+    }, 1000);
+  }
+
+  function buildWordTags(){
+    wordListEl.innerHTML = "";
+    WORDS.forEach(w=>{
+      const tag = document.createElement("span");
+      tag.className = "tag"; tag.textContent = w; tag.dataset.word = w;
+      wordListEl.appendChild(tag);
+    });
+  }
+
+  function markWordFound(word){
+    if(found.has(word)) return;
+    found.add(word); scoreEl.textContent = found.size;
+    const tag = [...wordListEl.children].find(t=>t.dataset.word===word);
+    if(tag) tag.classList.add("found");
+    (placedWords[word]||[]).forEach(i=> cells[i].classList.add("found"));
+    if(found.size === WORDS.length){ finish(true); }
+  }
+
+  function finish(won){
+    if(!playing) return;
+    playing = false; clearInterval(timer);
+    stateEl.textContent = won ? "¡Ganaste! 🎉" : "Tiempo agotado ⏳";
+    endTitle.textContent = won ? "¡Excelente! 🏆" : "¡Tiempo!";
+    endMsg.textContent = won
+      ? "Encontraste todas las frutas a tiempo. ¿Vas por otra?"
+      : "Se acabaron los 50 segundos. ¡Probá otra vez!";
+    endScreen.style.display = "grid";
+  }
+
+  function newGrid(){
+    // reset state
+    grid = Array.from({length:SIZE}, _=> Array(SIZE).fill(""));
+    placedWords = {}; found.clear(); selection = [];
+    selecting = false; startIndex = null; direction = null;
+    playing = true; stateEl.textContent = "Jugando..."; scoreEl.textContent = "0";
+    buildWordTags();
+
+    // place words
+    for(const word of WORDS){
+      let placed = false;
+      for(let tries=0; tries<300 && !placed; tries++){
+        const d = randChoice(DIRS);
+        const len = word.length;
+        const r0 = randInt(0, SIZE-1), c0 = randInt(0, SIZE-1);
+        const r1 = r0 + d.r*(len-1), c1 = c0 + d.c*(len-1);
+        if(!inBounds(r1,c1)) continue;
+        let ok = true, coords = [];
+        for(let k=0;k<len;k++){
+          const r = r0 + d.r*k, c = c0 + d.c*k;
+          const ch = grid[r][c];
+          if(ch!=="" && ch!==word[k]){ ok=false; break; }
+          coords.push([r,c]);
+        }
+        if(!ok) continue;
+        coords.forEach(([r,c],i)=> grid[r][c] = word[i]);
+        placedWords[word] = coords.map(([r,c])=> idx(r,c));
+        placed = true; // harmless local variable assignment
+      }
+    }
+
+    // fill empties
+    for(let r=0;r<SIZE;r++){
+      for(let c=0;c<SIZE;c++){
+        if(grid[r][c]===""){ grid[r][c] = letters[randInt(0,letters.length-1)]; }
+      }
+    }
+    render();
+    startTimer();
+  }
+
+  function render(){
+    gridEl.style.gridTemplateColumns = `repeat(${SIZE}, 36px)`;
+    gridEl.style.gridTemplateRows = `repeat(${SIZE}, 36px)`;
+    gridEl.innerHTML = ""; cells = [];
+    for(let r=0;r<SIZE;r++){
+      for(let c=0;c<SIZE;c++){
+        const div = document.createElement("div");
+        div.className = "cell"; div.textContent = grid[r][c];
+        div.dataset.index = idx(r,c);
+        gridEl.appendChild(div);
+        cells.push(div);
+      }
+    }
+  }
+
+  function getDirection(i1,i2){
+    const [r1,c1]=rc(i1), [r2,c2]=rc(i2);
+    const dr = Math.sign(r2-r1), dc = Math.sign(c2-c1);
+    // constrain to straight/diagonal
+    if(!(dr===0 || dc===0 || Math.abs(r2-r1)===Math.abs(c2-c1))) return null;
+    return {r:dr, c:dc};
+  }
+  function nextIndexByDir(i, d){
+    const [r,c]=rc(i); const rr=r+d.r, cc=c+d.c;
+    if(!inBounds(rr,cc)) return null;
+    return idx(rr,cc);
+  }
+  function pathToString(path){ return path.map(i=> cells[i].textContent).join(""); }
+
+  function resetSelectionVisual(){ selection.forEach(i=> cells[i].classList.remove("selected")); selection = []; }
+
+  function tryMarkSelection(){
+    if(selection.length<2) return;
+    const s = pathToString(selection), rev = s.split("").reverse().join("");
+    for(const w of WORDS){
+      if(s===w || rev===w){ markWordFound(w); return; }
+    }
+  }
+
+  function onDown(target){
+    if(!playing) return;
+    const cell = target.closest(".cell"); if(!cell) return;
+    selecting = true; startIndex = Number(cell.dataset.index); direction = null;
+    resetSelectionVisual(); selection = [startIndex];
+    cell.classList.add("selected");
+  }
+  function onEnter(target){
+    if(!selecting || !playing) return;
+    const cell = target.closest(".cell"); if(!cell) return;
+    const i2 = Number(cell.dataset.index);
+    if(selection.includes(i2)) return;
+    const dir = direction || getDirection(selection[0], i2);
+    if(!dir) return;
+    // grow stepwise
+    let cur = selection[selection.length-1];
+    while(cur!==i2){
+      const next = nextIndexByDir(cur, dir);
+      if(next===null) return resetSelectionVisual();
+      if(selection.includes(next)) return;
+      selection.push(next); cells[next].classList.add("selected"); cur = next;
+    }
+    direction = dir;
+  }
+  function onUp(){
+    if(!playing) return;
+    tryMarkSelection(); resetSelectionVisual();
+    selecting = false; startIndex = null; direction = null;
+  }
+
+  gridEl.addEventListener("mousedown", e=> onDown(e.target));
+  gridEl.addEventListener("mouseover", e=> onEnter(e.target));
+  window.addEventListener("mouseup", onUp);
+
+  gridEl.addEventListener("touchstart", (e)=>{
+    const t = e.touches[0]; const el = document.elementFromPoint(t.clientX, t.clientY);
+    if(el) onDown(el); e.preventDefault();
+  }, {passive:false});
+  gridEl.addEventListener("touchmove", (e)=>{
+    const t = e.touches[0]; const el = document.elementFromPoint(t.clientX, t.clientY);
+    if(el) onEnter(el); e.preventDefault();
+  }, {passive:false});
+  window.addEventListener("touchend", onUp);
+
+  document.getElementById("restart").addEventListener("click", ()=>{
+    endScreen.style.display = "none"; newGrid();
+  });
+  document.getElementById("playAgain").addEventListener("click", ()=>{
+    endScreen.style.display = "none"; newGrid();
+  });
+
+  newGrid();
+})();
+</script>
+</body>
+</html>
